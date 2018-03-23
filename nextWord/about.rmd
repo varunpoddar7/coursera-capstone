@@ -1,0 +1,7 @@
+
+## What's the Word
+
+The goal of this application is to provide an interface to type a few words, and have a prediction algorithm suggest what the next word is most likely to be. Such techniques are used extensively in typing and search applications. Please type a few words on the left panel. 
+
+The output on the right panel will confirm your typed phrase, and display the predicted word.   
+

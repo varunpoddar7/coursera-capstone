@@ -1,0 +1,12 @@
+name: nextWord
+title: nextWord
+username:
+account: varunpoddar
+server: shinyapps.io
+hostUrl: https://api.shinyapps.io/v1
+appId: 306419
+bundleId: 1285154
+url: https://varunpoddar.shinyapps.io/nextWord/
+when: 1521846059.9724
+asMultiple: FALSE
+asStatic: FALSE

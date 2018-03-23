@@ -1,0 +1,205 @@
+---
+title: "Milestone Report - Text Prediction CapStone"
+author: "Varun Poddar"
+date: "3/16/2018"
+output: html_document
+---
+
+# Overview
+
+This is the milestone report for the Data Science Capstone project. The goal is to build a predictive text application using natural language processing (NLP) techniques. I followed the coursera mentors' discussion posts to delve into quanteda to analyze/summarize the datasets, and build a predictive text model. Off the languages provided, the work focuses on data in English language only.
+
+As mentors have suggested in discussion forums, am following these key steps:
+- Load data from text files
+- Clean data
+- Generate corpus
+- Clean / transform the corpus
+- Generate n-grams & write to output files
+- Aggregate n-gram files to get frequencies by n-gram
+- Break n-grams into "base" and "prediction"
+
+## Data Setup
+
+The relevant dataset was downloaded and unzipped. Thereafter, read all 3 English language files, subsetting 10,000 records from each to analyze, explore and clean the underlying data. For easy reference in the future and to save computational resources, this data subset was saved to a file subsetData.txt.
+
+``` {r setup, message=FALSE, warning=FALSE}
+pkgs = c("data.table", "quanteda", "tm", "knitr", "stringi", "stringr")
+lapply(pkgs, require, character.only=TRUE)
+rm(pkgs)
+
+fileURL <- "https://d396qusza40orc.cloudfront.net/dsscapstone/dataset/Coursera-SwiftKey.zip"
+if(!file.exists("dataset.zip")) {
+    download.file(url=fileURL, destfile = "dataset.zip", method="curl")
+    unzip("dataset.zip")
+}
+rm(fileURL)
+
+#read all 3 files
+blogs <- readLines("./final/en_US/en_US.blogs.txt", encoding = "UTF-8", skipNul=TRUE)
+news <- readLines("./final/en_US/en_US.news.txt", encoding = "UTF-8", skipNul=TRUE)
+twitter <- readLines("./final/en_US/en_US.twitter.txt", encoding = "UTF-8", skipNul=TRUE)
+
+set.seed(1234)
+if(!file.exists("subsetData.txt")) {
+    #subset 10k lines from each file and write to a text file named subsetData
+    subsetData <- c(sample(twitter,10000), 
+                    sample(news,10000),
+                    sample(blogs,10000)
+                    )
+    writeLines(subsetData, "./subsetData.txt")
+}
+```
+
+## Data Summary
+
+The following summary statistics can be observed about the three files:
+```{r summary-stats}
+
+sizes <- round(file.info(c("./final/en_US/en_US.blogs.txt","./final/en_US/en_US.news.txt","./final/en_US/en_US.twitter.txt"))$size/1024^2)
+
+lines <- sapply(list(blogs,news,twitter), length)
+
+## Words per file
+words <- c(sum(stri_count_words(blogs)), 
+           sum(stri_count_words(news)), 
+           sum(stri_count_words(twitter))
+           )
+
+## Words per line
+wordsLine <- c(mean(stri_count_words(blogs)), 
+               mean(stri_count_words(news)), 
+               mean(stri_count_words(twitter))
+               )
+
+summaryFiles <- data.frame(file = c("blogs", "news", "twitter"),
+                           size = sizes,
+                           lines = lines, 
+                           words = words,
+                           words_per_line = wordsLine
+                     )
+
+kable(summaryFiles)
+rm(blogs, news, twitter)
+rm(sizes, lines, words, wordsLine, summaryFiles)
+
+```
+
+
+## Data Cleanup and Transformation
+
+To clean / transform the data, removed punctuations, numbers, whitespaces, stop words, profanity and made text all lower case. After testing various approaches to doing so, chose to use quanteda methods as they were extremely efficient once the documentation was clearer. Tested the dataset using stemming realizing that many words were incorrectly stemmed, so chose not to apply stemming.
+
+```{r clean-and-transform}
+
+#reload subsetData 
+subsetData <- readLines("./subsetData.txt", encoding = "UTF-8")
+
+#build profanity dictionary
+profanityUrl <- "https://storage.googleapis.com/google-code-archive-downloads/v2/code.google.com/badwordslist/badwords.txt"
+if(!file.exists("badwords.txt")) {
+    download.file(url=profanityUrl, destfile="badwords.txt", method="curl")
+}
+profanity <- read.table("badwords.txt", header=FALSE, sep="\n")
+rm(profanityUrl)
+
+#tokenization and n-grams using quanteda
+subsetCorpus <- corpus(subsetData)
+
+#create function to create dfm objects when calling n-grams 
+createDfm <- function(obj, n) {
+        nGramSp <- dfm(obj, ngrams= n, concatenator = " ", tolower = TRUE, remove_numbers=TRUE, remove_punct=TRUE, remove_symbols=TRUE, remove_separators=TRUE, remove_hyphens=TRUE, remove_url=TRUE, remove_twitter=TRUE, remove=stopwords("english"))
+}
+
+#call function to create dfm objects containing n-grams with a minimum frequency of 25 
+uniGram <- dfm_trim(createDfm(subsetCorpus, 1), min_count=10)
+biGram <- dfm_trim(createDfm(subsetCorpus, 2), min_count=5)
+triGram <- dfm_trim(createDfm(subsetCorpus, 3), min_count=2)
+quadGram <- dfm_trim(createDfm(subsetCorpus, 4), min_count=2)
+
+#create dataframe objects, combine and save to file
+uniGramDF <- setDT(data.frame(Content = featnames(uniGram), Frequency = colSums(uniGram),
+                             WordCount=1, row.names = NULL, stringsAsFactors = FALSE))
+biGramDF <- setDT(data.frame(Content = featnames(biGram), Frequency = colSums(biGram),
+                             WordCount=2, row.names = NULL, stringsAsFactors = FALSE))
+triGramDF <- setDT(data.frame(Content = featnames(triGram), Frequency = colSums(triGram),
+                             WordCount=3, row.names = NULL, stringsAsFactors = FALSE))
+quadGramDF <- setDT(data.frame(Content = featnames(quadGram), Frequency = colSums(quadGram),
+                             WordCount=4, row.names = NULL, stringsAsFactors = FALSE))
+nGramDF <- rbind(biGramDF, triGramDF, quadGramDF)
+rm(biGramDF, triGramDF, quadGramDF)
+
+#separate nGrams into 2 columns: n-1 words as base, nth word as predictor
+#with(nGramDF, str_count(Content, boundary("word")))
+#nGramDF[, str_count(Content, boundary("word"))]
+
+#split n-grams into comparison word/phrase and prediction word
+nGramDF[WordCount != 1, comparisonWord := word(Content, 1, -2L)]
+nGramDF[, predictionWord := word(Content, -1L)]
+
+#save data files
+saveRDS(nGramDF, file = "./nextWord/ngramdf.RDS")
+#write.csv(nGramDF, file = "./nextWord/ngramdf.csv")
+
+```
+
+
+```{r numFeatures}
+#get summary of number of features in each n-gram dataset
+summaryFeatures <- data.frame(
+                Dataset = c("uniGrams", "biGrams", "triGrams", "quadGrams"),
+                Number_Features = c(nfeat(uniGram), nfeat(biGram), nfeat(triGram),
+                                    nfeat(quadGram))
+                )
+
+kable(summaryFeatures)
+rm(summaryFeatures)
+
+```
+
+## Exploring Graphically
+
+The quanteda methods are also great at selecting the top frequency features across each n-gram dataset, and creating various graphs to explore the data visually. I used the wordcloud and network plot methods to see the features for uni/bi/tri/quad-grams. 
+
+```{r explore-wordclouds, message=FALSE, warning=FALSE}
+#show the top-20 features in each n-gram dataset and highlight most common words in a wordcloud
+textplot_wordcloud(uniGram, max_words = 100, min_size=0.5, max_size=3.0)
+topfeatures(uniGram, 20)
+
+textplot_wordcloud(biGram, max_words = 50, min_size=0.5, max_size=3.0)
+topfeatures(biGram, 20)
+
+textplot_wordcloud(triGram, max_words = 50, min_size=0.25, max_size=2.0)
+topfeatures(triGram, 20)
+
+textplot_wordcloud(quadGram, max_words = 50, min_size=0.25, max_size=2.0)
+topfeatures(quadGram, 20)
+```
+
+
+Alternatively, I also explored network-type relationships between most frequent features using FCM for unigrams and bigrams since they are more likely to appear together. Higher degree grams are not as likely to occur simultaneously. As FYI, a feature-ouccerances matrix (FCM) records number of co-occurances of tokens.
+```{r fcm-network-plots}
+uni_fcm <- fcm(uniGram)
+feat <- names(topfeatures(uni_fcm, 50))
+uni_fcm <- fcm_select(uni_fcm, feat)
+#dim(uni_fcm)
+size <- log(colSums(dfm_select(uniGram, feat)))
+textplot_network(uni_fcm, min_freq = 0.8, vertex_size = size / max(size) * 3)
+
+bi_fcm <- fcm(biGram)
+feat <- names(topfeatures(bi_fcm, 50))
+bi_fcm <- fcm_select(bi_fcm, feat)
+#dim(bi_fcm)
+size <- log(colSums(dfm_select(biGram, feat)))
+textplot_network(bi_fcm, min_freq = 0.8, vertex_size = size / max(size) * 3)
+
+rm(uni_fcm, bi_fcm, feat, size)
+
+
+
+
+```
+
+## Next Steps
+
+Next steps include focusing on the predictive model and shiny application. There are minor tweaks that I may make to improve the efficacy of the n-gram datasets. My assumption is that the saved n-gram datasets will make downstream  modeling activities much more efficient. For example, at this juncture I limited the dataset to 10,000 records from each of the three files, and a frequency threshold to improve computational speed. Depending on the accuracy of my predictions, I may have to revisit those thresholds.
+
